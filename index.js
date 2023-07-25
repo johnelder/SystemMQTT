@@ -1,7 +1,7 @@
 var osu = require('node-os-utils')
-
-
+const mqtt = require('mqtt')
 var options = require('./config.js').options
+
 console.log('Started')
 
 var systemData = {
@@ -21,6 +21,12 @@ var systemData = {
     netStat: []
 }
 
+
+const client = mqtt.connect(options.protocol + '://' + options.host + ":" + options.port)
+
+client.on('connect', function() {
+
+})
 
 setInterval(function() {
     osu.cpu.usage().then(cpuUsage => {
@@ -64,25 +70,20 @@ setInterval(function() {
     systemData.hostname = osu.os.hostname();
     systemData.loadAvg = osu.cpu.loadavg();
 
-
-
     if (systemData.processes > 0) {
-        console.log(systemData)
+        client.publish('SystemMQTT', JSON.stringify(systemData))
+        // client.publish('SystemMQTT', 'test')
+        console.log(systemData.processes)
     }
 
 }, options.interval)
 
-async function getSysData() {
+client.on('message', function(topic, message) {
+    // message is Buffer
+    console.log(message.toString())
+    client.end()
+})
 
-}
-
-
-// var count = cpu.count() // 8
-
-// var lodAvg = cpu.loadavg()
-// var osCmd = osu.osCmd
-// console.log(lodAvg)
-// osCmd.whoami()
-//     .then(userName => {
-//         console.log(userName) // admin
-//     })
+client.on('disconnect', function() {
+    console.log('disconnected')
+})

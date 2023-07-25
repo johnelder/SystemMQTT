@@ -1,0 +1,6 @@
+node_modules
+config/config.js
+/output/*
+ecosystem.config.js
+src/plugins/plugins.json
+TODO
