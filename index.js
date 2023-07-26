@@ -1,80 +1,71 @@
 var osu = require('node-os-utils')
 const mqtt = require('mqtt')
 var options = require('./config.js').options
+var values = require('./config').values
+var broker = require('./config').broker
 
 console.log('Started')
 
-var systemData = {
-    hostname: '',
-    processes: 0,
-    cpuUsage: 0,
-    loadAvg: [],
-    driveUsed: 0,
-    driveFree: 0,
-    driveTotal: 0,
-    drivePercent: 0,
-    memUsed: 0,
-    memFree: 0,
-    memTotal: 0,
-    memPercent: 0,
-    osName: '',
-    netStat: []
-}
+var connectString = broker.protocol + '://' + broker.host + ":" + broker.port
+const client = mqtt.connect(broker)
+//TODO add error handling for connection
 
 
-const client = mqtt.connect(options.protocol + '://' + options.host + ":" + options.port)
 
-client.on('connect', function() {
-
+client.on('connect', function(packet, err) {
+    if (!err) {
+        console.log('Connected to ' + connectString)
+    } else {
+        console.error(err)
+    }
 })
 
+client.on('error', function(err) {
+    console.warn(err)
+})
+
+
+
 setInterval(function() {
-    osu.cpu.usage().then(cpuUsage => {
-        systemData.cpuUsage = cpuUsage
-    })
-    osu.drive.info().then(driveInfo => {
-        systemData.driveUsed = driveInfo.usedGb;
-        systemData.driveFree = driveInfo.freeGb;
-        systemData.driveTotal = driveInfo.totalGb;
-        systemData.drivePercent = driveInfo.usedPercentage;
-    })
-    osu.mem.info().then(memInfo => {
-        systemData.memFree = memInfo.freeMemMb;
-        systemData.memUsed = memInfo.usedMemMb;
-        systemData.memTotal = memInfo.totalMemMb;
-        systemData.memPercent = memInfo.usedMemPercentage;
-    })
-    osu.netstat.inOut().then(stats => {
-        systemData.netStat = stats[options.netDevice];
-    })
-    osu.os.oos().then(osName => {
-        systemData.osName = osName;
-    })
+    var hostname = osu.os.hostname();
+    getStats().then(systemData => {
+        options.logMessages ? console.log(systemData) : null
+        options.rootTopic = options.rootTopic ? options.rootTopic : 'SystemMQTT';
+        options.idTopic = options.hostTopic ? hostname : broker.clientId;
 
-    osu.proc.totalProcesses().then(proc => {
-        systemData.processes = proc
-    })
+        if (options.messageType === 'json') {
+            client.publish(options.rootTopic + '/' + options.idTopic, JSON.stringify(systemData))
+            // client.publish('SystemMQTT', 'test')
+        } else {
 
-    if (options.topCpu) {
+            for (const key in systemData) {
+                if (typeof(systemData[key]) == 'object') {
+                    for (const i in systemData[key]) {
+                        if (typeof(systemData[key][i]) == 'object') {
+                            for (const j in systemData[key][i]) {
+                                if (typeof(systemData[key][i][j]) == 'object') {
+                                    for (const k in systemData[key][i][j]) {
+                                        client.publish(options.rootTopic + '/' + options.idTopic + '/' + key + '/' + i + '/' + j + '/' + k, JSON.stringify(systemData[key][i][j][k]))
+                                    }
+                                } else {
+                                    client.publish(options.rootTopic + '/' + options.idTopic + '/' + key + '/' + i + '/' + j, JSON.stringify(systemData[key][i][j]))
+                                }
+                            }
+                        } else {
+                            client.publish(options.rootTopic + '/' + options.idTopic + '/' + key + '/' + i, JSON.stringify(systemData[key][i]))
+                        }
+                    }
+                } else {
+                    client.publish(options.rootTopic + '/' + options.idTopic + '/' + key, JSON.stringify(systemData[key]))
+                }
 
-        osu.osCmd.topCpu().then(topCpu => {
-            systemData.topCpu = topCpu;
-        })
-    }
-    if (options.topMem) {
-        osu.osCmd.topMem().then(topMem => {
-            systemData.topMem = topMem;
-        })
-    }
+            }
 
-    systemData.hostname = osu.os.hostname();
-    systemData.loadAvg = osu.cpu.loadavg();
+        }
+    });
 
-    if (systemData.processes > 0) {
-        client.publish('SystemMQTT', JSON.stringify(systemData))
-        // client.publish('SystemMQTT', 'test')
-        console.log(systemData.processes)
-    }
+
+
 
 }, options.interval)
 
@@ -87,3 +78,42 @@ client.on('message', function(topic, message) {
 client.on('disconnect', function() {
     console.log('disconnected')
 })
+
+
+async function getStats() {
+    var stats = {};
+
+    var calls = [];
+
+    for (cat in values) {
+        if (cat != 'parameters') {
+            var category = values[cat];
+            for (cmd in category) {
+                if (category[cmd]) {
+                    if (category[cmd] !== true) {
+                        calls.push(osu[cat][cmd](category[cmd]))
+                    } else {
+                        calls.push(osu[cat][cmd]())
+                    }
+                }
+            }
+        }
+    }
+
+    await Promise.all(calls).then(res => {
+        var count = 0;
+        for (cat in values) {
+            if (cat != 'parameters') {
+                var category = values[cat];
+                for (cmd in category) {
+                    if (category[cmd]) {
+                        stats[cat] ? null : stats[cat] = {}
+                        stats[cat][cmd] = res[count];
+                        count++;
+                    }
+                }
+            }
+        }
+    })
+    return stats;
+}
