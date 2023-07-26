@@ -6,6 +6,7 @@ Data is pulled from the system using **node-os-utils** and packets are sent with
 ## Instructions
 
 *   Download and unzip into home directory.
+*   Run npm install
 *   Edit config.js
 *   Run with node index.js or use something like PM2 for managing the process.
 
